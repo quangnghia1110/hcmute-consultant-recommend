@@ -1,0 +1,52 @@
+# Biến môi trường
+.env
+.env.local
+.env.*.local
+
+# Thư mục cache và database
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Thư mục cache
+cache/
+.cache/
+
+# Log files
+*.log
+logs/
+
+# Local development settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Thư mục build và distribution
+build/
+dist/
+*.egg-info/
+
+# Thư mục dữ liệu tạm
+data/temp/
+temp/
+tmp/
+
+# File nén
+*.zip
+*.tar.gz
+*.rar
+
+# File hệ thống
+.DS_Store
+Thumbs.db
