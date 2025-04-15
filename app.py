@@ -188,7 +188,7 @@ def get_recommend_answers():
                 'status': 'error',
                 'message': 'Tham số truy vấn "text" là bắt buộc và không được rỗng'
             }), 400
-        chat_url = f"http://localhost:2000/chat?text={query}"
+        chat_url = f"https://hcmute-consultant-chatbot-production.up.railway.app/chat?text={query}"
         response = requests.get(chat_url)
         if response.status_code != 200:
             return jsonify({
