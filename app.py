@@ -23,12 +23,11 @@ STOPWORDS_FILE = "vietnamese-stopwords.txt"
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-@app.before_first_request
-def initialize_app():
+def initialize_app(app):
     df, vectorizer, tfidf_matrix = prepare_data()
-    current_app.config['df'] = df
-    current_app.config['vectorizer'] = vectorizer
-    current_app.config['tfidf_matrix'] = tfidf_matrix
+    app.config['df'] = df
+    app.config['vectorizer'] = vectorizer
+    app.config['tfidf_matrix'] = tfidf_matrix
 
 def prepare_data():
     df = load_json_data(JSON_FILE)
@@ -117,8 +116,8 @@ def create_tfidf_model(df, stopwords):
 
 def recommend_similar_questions(query, top_n=5):
     try:
-        vectorizer = current_app.config['vectorizer']
-        tfidf_matrix = current_app.config['tfidf_matrix']
+        vectorizer = app.config['vectorizer']
+        tfidf_matrix = app.config['tfidf_matrix']
         query_tokenized = tokenize_vietnamese(query)
         query_tfidf = vectorizer.transform([query_tokenized])
         sim_scores = cosine_similarity(query_tfidf, tfidf_matrix)[0]
@@ -268,6 +267,11 @@ def generate_alternative_answers(question, answer):
     except Exception as e:
         print(f"Lỗi khi gọi Gemini API: {str(e)}")
         return []
+
+if initialize_app(app):
+    print("✅ Dữ liệu đã khởi tạo")
+else:
+    print("⚠️ Dữ liệu chưa được khởi tạo hoàn chỉnh")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 4000))
