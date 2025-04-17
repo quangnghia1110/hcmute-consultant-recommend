@@ -1,11 +1,19 @@
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
 TEMPERATURE = float(os.getenv("TEMPERATURE"))
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS"))
-TOP_K = int(os.getenv("TOP_K"))
 TOP_P = float(os.getenv("TOP_P"))
+TOP_K = int(os.getenv("TOP_K"))
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS"))
+
+CURRENT_DIR = Path(__file__).parent.absolute()
+DATA_DIR = CURRENT_DIR / os.getenv("DATA_DIR", "data")
+JSON_FILE = os.getenv("JSON_FILE")
+TFIDF_MATRIX_FILE = os.getenv("TFIDF_MATRIX_FILE")
+VECTORIZER_FILE = os.getenv("VECTORIZER_FILE")
+STOPWORDS_FILE = os.getenv("STOPWORDS_FILE")

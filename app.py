@@ -9,17 +9,15 @@ from pyvi import ViTokenizer
 import joblib
 import re
 import requests
+import numpy as np
 import google.generativeai as genai
-from config import GOOGLE_API_KEY, GEMINI_MODEL, TEMPERATURE, TOP_P, TOP_K, MAX_OUTPUT_TOKENS
+from config import (
+    GOOGLE_API_KEY, GEMINI_MODEL, TEMPERATURE, TOP_P, TOP_K, MAX_OUTPUT_TOKENS,
+    CURRENT_DIR, DATA_DIR, JSON_FILE, STOPWORDS_FILE, TFIDF_MATRIX_FILE, VECTORIZER_FILE
+)
+from sentence_transformers import SentenceTransformer
 
 app = Flask(__name__)
-
-CURRENT_DIR = Path(__file__).parent.absolute()
-DATA_DIR = CURRENT_DIR / "data"
-JSON_FILE = "output.json"
-TFIDF_MATRIX_FILE = "tfidf_matrix.pkl"
-VECTORIZER_FILE = "tfidf_vectorizer.pkl"
-STOPWORDS_FILE = "vietnamese-stopwords.txt"
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -123,7 +121,7 @@ def recommend_similar_questions(query, top_n=5):
         sim_scores = cosine_similarity(query_tfidf, tfidf_matrix)[0]
         sim_scores_with_indices = [];
         for idx, score in enumerate(sim_scores):
-            if score > 0.1:
+            if score > 0.3:
                 sim_scores_with_indices.append((idx, score))
         sim_scores_with_indices = sorted(sim_scores_with_indices, 
                                          key=lambda x: x[1], 
@@ -155,7 +153,7 @@ def recommend():
         df = current_app.config['df']
         recommendations = []
         for idx, score in zip(recommended_indices, similarity_scores):
-            if idx < len(df) and score > 0.2:
+            if idx < len(df) and score > 0.3:
                 recommendations.append({
                     'question': df.iloc[idx]['question'],
                     'answer': df.iloc[idx]['answer'],
