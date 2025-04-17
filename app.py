@@ -15,7 +15,6 @@ from config import (
     GOOGLE_API_KEY, GEMINI_MODEL, TEMPERATURE, TOP_P, TOP_K, MAX_OUTPUT_TOKENS,
     CURRENT_DIR, DATA_DIR, JSON_FILE, STOPWORDS_FILE, TFIDF_MATRIX_FILE, VECTORIZER_FILE
 )
-from sentence_transformers import SentenceTransformer
 
 app = Flask(__name__)
 
