@@ -5,46 +5,193 @@ import json
 import os
 from pathlib import Path
 from flask import Flask, request, jsonify, current_app
+from flask_cors import CORS
 from pyvi import ViTokenizer
 import joblib
 import re
 import requests
 import numpy as np
 import google.generativeai as genai
+import mysql.connector
+from mysql.connector import Error
 from config import (
     GOOGLE_API_KEY, GEMINI_MODEL, TEMPERATURE, TOP_P, TOP_K, MAX_OUTPUT_TOKENS,
-    CURRENT_DIR, DATA_DIR, JSON_FILE, STOPWORDS_FILE, TFIDF_MATRIX_FILE, VECTORIZER_FILE
+    CURRENT_DIR, DATA_DIR, JSON_FILE, STOPWORDS_FILE, TFIDF_MATRIX_FILE, VECTORIZER_FILE,
+    MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_PORT
 )
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://hcmute-consultant.vercel.app", "*"]}})
 
 genai.configure(api_key=GOOGLE_API_KEY)
+
+def create_mysql_connection():
+    try:
+        connection = mysql.connector.connect(
+            host=MYSQL_HOST,
+            port=MYSQL_PORT,
+            user=MYSQL_USER,
+            password=MYSQL_PASSWORD,
+            database=MYSQL_DATABASE
+        )
+        if connection.is_connected():
+            print("✅ Kết nối MySQL thành công")
+            return connection
+    except Error as e:
+        print(f"Lỗi khi kết nối đến MySQL: {e}")
+    return None
+
+def fetch_data_from_mysql():
+    connection = create_mysql_connection()
+    if not connection:
+        print("❌ Không thể kết nối đến MySQL")
+        return pd.DataFrame()
+
+    try:
+        print("📊 Kiểm tra tổng số bản ghi")
+        cursor = connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM question")
+        total_questions = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM answer")
+        total_answers = cursor.fetchone()[0]
+        print(f"✅ Tổng số: {total_questions} câu hỏi, {total_answers} câu trả lời trong database")
+        
+        query_questions = """
+        SELECT q.id, q.content, q.created_at, q.title, q.status_approval, q.role_ask_id, q.user_id
+        FROM question q
+        WHERE q.status_delete = 0
+        """
+        
+        query_answers = """
+        SELECT a.id, a.content, a.created_at, a.question_id, a.status_answer, a.status_approval,
+               a.title, a.role_consultant_id, a.user_id
+        FROM answer a
+        """
+        
+        print("📊 Truy vấn bảng question")
+        questions_df = pd.read_sql(query_questions, connection)
+        print(f"✅ Lấy được {len(questions_df)} câu hỏi")
+        
+        print("📊 Truy vấn bảng answer")
+        answers_df = pd.read_sql(query_answers, connection)
+        print(f"✅ Lấy được {len(answers_df)} câu trả lời")
+        
+        if questions_df.empty:
+            print("❌ Không có dữ liệu trong bảng question thỏa mãn điều kiện")
+            return pd.DataFrame()
+            
+        if answers_df.empty:
+            print("❌ Không có dữ liệu trong bảng answer thỏa mãn điều kiện")
+            return pd.DataFrame()
+            
+        print(f"📊 Thực hiện merge hai bảng, question.id -> answer.question_id")
+        print(f"📊 ID trong bảng question: {questions_df['id'].tolist()[:5]}")
+        print(f"📊 question_id trong bảng answer: {answers_df['question_id'].tolist()[:5]}")
+        
+        merged_df = pd.merge(
+            questions_df,
+            answers_df,
+            left_on='id',
+            right_on='question_id',
+            how='inner',
+            suffixes=('_question', '_answer')
+        )
+        
+        print(f"✅ Sau khi merge còn {len(merged_df)} dòng")
+        
+        if merged_df.empty:
+            print("❌ Không có dữ liệu sau khi merge")
+            print("📊 Thử thực hiện left join để xem vấn đề")
+            merged_df = pd.merge(
+                questions_df,
+                answers_df,
+                left_on='id',
+                right_on='question_id',
+                how='left',
+                suffixes=('_question', '_answer')
+            )
+            print(f"✅ Sau khi left join có {len(merged_df)} dòng")
+            
+            has_answer = merged_df['question_id'].notna().sum()
+            print(f"📊 Số câu hỏi có câu trả lời: {has_answer}/{len(merged_df)}")
+            
+            if has_answer > 0:
+                merged_df = merged_df[merged_df['question_id'].notna()]
+                print(f"✅ Giữ lại {len(merged_df)} câu hỏi có câu trả lời")
+        
+        if merged_df.empty:
+            print("❌ Vẫn không có dữ liệu sau khi thử các phương pháp join khác nhau")
+            return pd.DataFrame()
+            
+        mysql_df = pd.DataFrame({
+            'question': merged_df['content_question'],
+            'answer': merged_df['content_answer'],
+            'question_id': merged_df['id_question'],
+            'answer_id': merged_df['id_answer'],
+            'source': 'mysql'
+        })
+        
+        print(f"✅ Trả về DataFrame với {len(mysql_df)} dòng từ MySQL")
+        return mysql_df
+    
+    except Error as e:
+        print(f"❌ Lỗi khi truy vấn MySQL: {e}")
+        return pd.DataFrame()
+    
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
 
 def initialize_app(app):
     df, vectorizer, tfidf_matrix = prepare_data()
     app.config['df'] = df
     app.config['vectorizer'] = vectorizer
     app.config['tfidf_matrix'] = tfidf_matrix
+    return True
 
 def prepare_data():
-    df = load_json_data(JSON_FILE)
+    print("📊 Đọc dữ liệu từ file JSON")
+    json_df = load_json_data(JSON_FILE)
+    if not json_df.empty:
+        json_df['source'] = 'json'
+        print(f"✅ Đọc được {len(json_df)} dòng từ JSON")
+    else:
+        print("⚠️ Không đọc được dữ liệu từ JSON hoặc file JSON trống")
+        
+    print("📊 Đọc dữ liệu từ MySQL")
+    mysql_df = fetch_data_from_mysql()
+    if not mysql_df.empty:
+        print(f"✅ Đọc được {len(mysql_df)} dòng từ MySQL")
+    else:
+        print("⚠️ Không đọc được dữ liệu từ MySQL")
+    
+    if not mysql_df.empty:
+        print("📊 Kết hợp dữ liệu từ JSON và MySQL")
+        df = pd.concat([json_df, mysql_df], ignore_index=True)
+        print(f"✅ Tổng số dòng sau khi kết hợp: {len(df)}")
+    else:
+        print("📊 Chỉ sử dụng dữ liệu từ JSON")
+        df = json_df
+    
+    print("📊 Chuẩn hóa và tiền xử lý dữ liệu")
     df['question'] = df['question'].astype(str).fillna('')
     df['answer'] = df['answer'].astype(str).fillna('')
     df = df.drop_duplicates(subset=['question'], keep='last').reset_index(drop=True)
+    print(f"✅ Sau khi loại bỏ trùng lặp còn {len(df)} dòng")
+    
+    print("📊 Tokenize dữ liệu tiếng Việt")
     df['question_tokenized'] = df['question'].apply(tokenize_vietnamese)
     df['answer_tokenized'] = df['answer'].apply(tokenize_vietnamese)
     df['content'] = df['question_tokenized'] + ' ' + df['answer_tokenized']
+    
+    print("📊 Tải stopwords")
     vietnamese_stopwords = load_stopwords()
-    tfidf_path = get_data_path(TFIDF_MATRIX_FILE)
-    vectorizer_path = get_data_path(VECTORIZER_FILE)
-    if tfidf_path.exists() and vectorizer_path.exists():
-        try:
-            tfidf_matrix = joblib.load(tfidf_path)
-            vectorizer = joblib.load(vectorizer_path)
-        except Exception as e:
-            vectorizer, tfidf_matrix = create_tfidf_model(df, vietnamese_stopwords)
-    else:
-        vectorizer, tfidf_matrix = create_tfidf_model(df, vietnamese_stopwords)
+    print(f"✅ Đã tải {len(vietnamese_stopwords)} stopwords")
+
+    print("📊 Tạo mô hình TF-IDF")
+    vectorizer, tfidf_matrix = create_tfidf_model(df, vietnamese_stopwords)
+    print(f"✅ Đã tạo ma trận TF-IDF kích thước {tfidf_matrix.shape}")
+    
     return df, vectorizer, tfidf_matrix
 
 def load_json_data(json_file):
@@ -59,6 +206,7 @@ def load_json_data(json_file):
             return pd.DataFrame(columns=['question', 'answer'])
         return df
     except Exception as e:
+        print(f"Lỗi khi đọc file JSON: {str(e)}")
         return pd.DataFrame(columns=['question', 'answer'])
     
 def get_data_path(filename):
@@ -79,6 +227,7 @@ def load_stopwords():
             stopwords = [line.strip() for line in f if line.strip()]
         return stopwords
     except Exception as e:
+        print(f"Lỗi khi đọc stopwords: {str(e)}")
         return []
 
 def tokenize_vietnamese(text):
@@ -118,9 +267,9 @@ def recommend_similar_questions(query, top_n=5):
         query_tokenized = tokenize_vietnamese(query)
         query_tfidf = vectorizer.transform([query_tokenized])
         sim_scores = cosine_similarity(query_tfidf, tfidf_matrix)[0]
-        sim_scores_with_indices = [];
+        sim_scores_with_indices = []
         for idx, score in enumerate(sim_scores):
-            if score > 0.3:
+            if score > 0.1:
                 sim_scores_with_indices.append((idx, score))
         sim_scores_with_indices = sorted(sim_scores_with_indices, 
                                          key=lambda x: x[1], 
@@ -153,11 +302,23 @@ def recommend():
         recommendations = []
         for idx, score in zip(recommended_indices, similarity_scores):
             if idx < len(df) and score > 0.3:
-                recommendations.append({
+                result = {
                     'question': df.iloc[idx]['question'],
                     'answer': df.iloc[idx]['answer'],
                     'similarity_score': float(score)
-                })
+                }
+                
+                if 'source' in df.columns:
+                    result['source'] = df.iloc[idx]['source']
+                    
+                if 'question_id' in df.columns and not pd.isna(df.iloc[idx].get('question_id')):
+                    result['question_id'] = int(df.iloc[idx]['question_id'])
+                    
+                if 'answer_id' in df.columns and not pd.isna(df.iloc[idx].get('answer_id')):
+                    result['answer_id'] = int(df.iloc[idx]['answer_id'])
+                
+                recommendations.append(result)
+                
         if not recommendations:
             return jsonify({
                 'status': 'success',
@@ -265,11 +426,27 @@ def generate_alternative_answers(question, answer):
         print(f"Lỗi khi gọi Gemini API: {str(e)}")
         return []
 
-if initialize_app(app):
-    print("✅ Dữ liệu đã khởi tạo")
-else:
-    print("⚠️ Dữ liệu chưa được khởi tạo hoàn chỉnh")
+@app.route('/refresh-data', methods=['POST'])
+def refresh_data():
+    try:
+        if initialize_app(app):
+            return jsonify({
+                'status': 'success',
+                'message': 'Dữ liệu và model đã được làm mới thành công'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Có lỗi xảy ra khi làm mới dữ liệu'
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Lỗi máy chủ nội bộ: {str(e)}'
+        }), 500
 
 if __name__ == "__main__":
+    initialize_app(app)
+    print("✅ Dữ liệu đã khởi tạo")
     port = int(os.environ.get('PORT', 4000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False) 
