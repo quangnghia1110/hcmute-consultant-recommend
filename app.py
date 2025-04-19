@@ -17,7 +17,7 @@ from mysql.connector import Error
 from config import (
     GOOGLE_API_KEY, GEMINI_MODEL, TEMPERATURE, TOP_P, TOP_K, MAX_OUTPUT_TOKENS,
     CURRENT_DIR, DATA_DIR, JSON_FILE, STOPWORDS_FILE, TFIDF_MATRIX_FILE, VECTORIZER_FILE,
-    MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_PORT
+    MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_PORT, CHAT_URL
 )
 
 app = Flask(__name__)
@@ -355,7 +355,7 @@ def get_recommend_answers():
                 'status': 'error',
                 'message': 'Tham số truy vấn "text" là bắt buộc và không được rỗng'
             }), 400
-        chat_url = f"https://hcmute-consultant-chatbot-production.up.railway.app/chat?text={query}"
+        chat_url = f"{CHAT_URL}/chat?text={query}"
         response = requests.get(chat_url)
         if response.status_code != 200:
             return jsonify({
@@ -367,7 +367,7 @@ def get_recommend_answers():
         answer = chat_data['data']['answer']
         alternative_answers = generate_alternative_answers(question, answer)
         if len(alternative_answers) > 5:
-            alternative_answers = alternative_answers[:4]
+            alternative_answers = alternative_answers[:5]
         result_answers = []
         for a in alternative_answers:
             result_answers.append({
@@ -375,7 +375,7 @@ def get_recommend_answers():
             })
         return jsonify({
             'status': 'success',
-            'message': 'Đã tạo 4 câu trả lời thay thế',
+            'message': 'Đã tạo 5 câu trả lời thay thế',
             'question': question,
             'answer': answer,
             'alternative_answers': result_answers
@@ -390,7 +390,7 @@ def get_recommend_answers():
 def generate_alternative_answers(question, answer):
     try:
         prompt = f"""
-            Dựa vào câu hỏi và câu trả lời gốc dưới đây, hãy tạo chính xác 4 câu trả lời thay thế KHÁC BIỆT HOÀN TOÀN về cách trình bày.
+            Dựa vào câu hỏi và câu trả lời gốc dưới đây, hãy tạo chính xác 5 câu trả lời thay thế KHÁC BIỆT HOÀN TOÀN về cách trình bày.
             MỖI câu trả lời PHẢI có:
             - Độ dài khác nhau (ngắn, trung bình, dài)
             - Cách tiếp cận khác nhau (trực tiếp, chi tiết, ví dụ thực tế, dưới dạng hướng dẫn)
@@ -399,7 +399,7 @@ def generate_alternative_answers(question, answer):
             CÂU HỎI: {question}
             CÂU TRẢ LỜI GỐC: {answer}
             
-            CHỈ TRẢ VỀ 4 CÂU TRẢ LỜI THAY THẾ, MỖI CÂU TRÊN 1 ĐOẠN VĂN, KHÔNG ĐÁNH SỐ, KHÔNG THÊM BẤT KỲ GIẢI THÍCH NÀO KHÁC.
+            CHỈ TRẢ VỀ 5 CÂU TRẢ LỜI THAY THẾ, MỖI CÂU TRÊN 1 ĐOẠN VĂN, KHÔNG ĐÁNH SỐ, KHÔNG THÊM BẤT KỲ GIẢI THÍCH NÀO KHÁC.
         """
         model = genai.GenerativeModel(GEMINI_MODEL)
         response = model.generate_content(
