@@ -165,13 +165,22 @@ def prepare_data():
     else:
         print("⚠️ Không đọc được dữ liệu từ MySQL")
     
-    if not mysql_df.empty:
+    # Chỉ phối hợp dữ liệu nếu cả hai nguồn đều có dữ liệu
+    if not mysql_df.empty and not json_df.empty:
         print("📊 Kết hợp dữ liệu từ JSON và MySQL")
         df = pd.concat([json_df, mysql_df], ignore_index=True)
         print(f"✅ Tổng số dòng sau khi kết hợp: {len(df)}")
+    elif not mysql_df.empty:
+        print("📊 Chỉ sử dụng dữ liệu từ MySQL")
+        df = mysql_df
     else:
         print("📊 Chỉ sử dụng dữ liệu từ JSON")
         df = json_df
+    
+    # Nếu không có dữ liệu từ cả hai nguồn, tạo DataFrame rỗng để tránh lỗi
+    if df.empty:
+        print("⚠️ Không có dữ liệu từ cả MySQL và JSON, tạo DataFrame rỗng")
+        df = pd.DataFrame(columns=['question', 'answer'])
     
     print("📊 Chuẩn hóa và tiền xử lý dữ liệu")
     df['question'] = df['question'].astype(str).fillna('')
