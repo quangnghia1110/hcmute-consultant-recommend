@@ -9,3 +9,4 @@ gunicorn==21.2.0
 requests
 google-generativeai
 python-dotenv
+mysql-connector-python
