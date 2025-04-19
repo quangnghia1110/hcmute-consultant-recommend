@@ -143,11 +143,20 @@ def fetch_data_from_mysql():
             connection.close()
 
 def initialize_app(app):
-    df, vectorizer, tfidf_matrix = prepare_data()
-    app.config['df'] = df
-    app.config['vectorizer'] = vectorizer
-    app.config['tfidf_matrix'] = tfidf_matrix
-    return True
+    try:
+        print("🚀 Bắt đầu khởi tạo dữ liệu")
+        df, vectorizer, tfidf_matrix = prepare_data()
+        app.config['df'] = df
+        app.config['vectorizer'] = vectorizer
+        app.config['tfidf_matrix'] = tfidf_matrix
+        print("✅ Khởi tạo dữ liệu thành công")
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi khi khởi tạo dữ liệu: {str(e)}")
+        app.config['df'] = pd.DataFrame(columns=['question', 'answer'])
+        app.config['vectorizer'] = None
+        app.config['tfidf_matrix'] = None
+        return False
 
 def prepare_data():
     print("📊 Đọc dữ liệu từ file JSON")
@@ -448,7 +457,7 @@ def refresh_data():
 
 @app.route('/debug', methods=['GET'])
 def debug():
-    df = current_app.config['df']
+    df = current_app.config['df']  # Line 451
     vectorizer = current_app.config['vectorizer']
     tfidf_matrix = current_app.config['tfidf_matrix']
     mysql_connection = create_mysql_connection()
