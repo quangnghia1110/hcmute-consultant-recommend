@@ -29,7 +29,7 @@ def create_mysql_connection():
     try:
         connection = mysql.connector.connect(
             host=MYSQL_HOST,
-            port=MYSQL_PORT,
+            port=int(MYSQL_PORT),  # Ensure port is an integer
             user=MYSQL_USER,
             password=MYSQL_PASSWORD,
             database=MYSQL_DATABASE
@@ -165,7 +165,6 @@ def prepare_data():
     else:
         print("⚠️ Không đọc được dữ liệu từ MySQL")
     
-    # Chỉ phối hợp dữ liệu nếu cả hai nguồn đều có dữ liệu
     if not mysql_df.empty and not json_df.empty:
         print("📊 Kết hợp dữ liệu từ JSON và MySQL")
         df = pd.concat([json_df, mysql_df], ignore_index=True)
@@ -177,7 +176,6 @@ def prepare_data():
         print("📊 Chỉ sử dụng dữ liệu từ JSON")
         df = json_df
     
-    # Nếu không có dữ liệu từ cả hai nguồn, tạo DataFrame rỗng để tránh lỗi
     if df.empty:
         print("⚠️ Không có dữ liệu từ cả MySQL và JSON, tạo DataFrame rỗng")
         df = pd.DataFrame(columns=['question', 'answer'])
@@ -206,16 +204,20 @@ def prepare_data():
 def load_json_data(json_file):
     try:
         json_path = get_data_path(json_file)
+        print(f"Loading JSON from: {json_path}")
         if not json_path.exists():
+            print("JSON file does not exist")
             return pd.DataFrame(columns=['question', 'answer'])
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         df = pd.DataFrame(data)
+        print(f"JSON data loaded: {len(df)} rows")
         if not all(col in df.columns for col in ['question', 'answer']):
+            print("JSON missing required columns")
             return pd.DataFrame(columns=['question', 'answer'])
         return df
     except Exception as e:
-        print(f"Lỗi khi đọc file JSON: {str(e)}")
+        print(f"Error loading JSON: {str(e)}")
         return pd.DataFrame(columns=['question', 'answer'])
     
 def get_data_path(filename):
@@ -276,13 +278,9 @@ def recommend_similar_questions(query, top_n=5):
         query_tokenized = tokenize_vietnamese(query)
         query_tfidf = vectorizer.transform([query_tokenized])
         sim_scores = cosine_similarity(query_tfidf, tfidf_matrix)[0]
-        sim_scores_with_indices = []
-        for idx, score in enumerate(sim_scores):
-            if score > 0.1:
-                sim_scores_with_indices.append((idx, score))
-        sim_scores_with_indices = sorted(sim_scores_with_indices, 
-                                         key=lambda x: x[1], 
-                                         reverse=True)
+        print(f"Top 10 similarity scores for '{query}': {sorted(sim_scores, reverse=True)[:10]}")
+        sim_scores_with_indices = [(idx, score) for idx, score in enumerate(sim_scores) if score > 0.1]
+        sim_scores_with_indices = sorted(sim_scores_with_indices, key=lambda x: x[1], reverse=True)
         top_results = sim_scores_with_indices[:top_n]
         question_indices = [i[0] for i in top_results]
         question_scores = [i[1] for i in top_results]
@@ -310,24 +308,19 @@ def recommend():
         df = current_app.config['df']
         recommendations = []
         for idx, score in zip(recommended_indices, similarity_scores):
-            if idx < len(df) and score > 0.3:
+            if idx < len(df) and score > 0.1:  # Lowered threshold for testing
                 result = {
                     'question': df.iloc[idx]['question'],
                     'answer': df.iloc[idx]['answer'],
                     'similarity_score': float(score)
                 }
-                
                 if 'source' in df.columns:
                     result['source'] = df.iloc[idx]['source']
-                    
                 if 'question_id' in df.columns and not pd.isna(df.iloc[idx].get('question_id')):
                     result['question_id'] = int(df.iloc[idx]['question_id'])
-                    
                 if 'answer_id' in df.columns and not pd.isna(df.iloc[idx].get('answer_id')):
                     result['answer_id'] = int(df.iloc[idx]['answer_id'])
-                
                 recommendations.append(result)
-                
         if not recommendations:
             return jsonify({
                 'status': 'success',
@@ -426,7 +419,6 @@ def generate_alternative_answers(question, answer):
                         current_answer = ""
             if current_answer:
                 raw_answers.append(current_answer)
-            
             return raw_answers
         else:
             print("Gemini API không trả về kết quả dạng text")
@@ -454,8 +446,33 @@ def refresh_data():
             'message': f'Lỗi máy chủ nội bộ: {str(e)}'
         }), 500
 
+@app.route('/debug', methods=['GET'])
+def debug():
+    df = current_app.config['df']
+    vectorizer = current_app.config['vectorizer']
+    tfidf_matrix = current_app.config['tfidf_matrix']
+    mysql_connection = create_mysql_connection()
+    mysql_status = "Connected" if mysql_connection and mysql_connection.is_connected() else "Failed"
+    mysql_data_count = 0
+    if mysql_connection and mysql_connection.is_connected():
+        cursor = mysql_connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM question")
+        mysql_data_count = cursor.fetchone()[0]
+        cursor.close()
+        mysql_connection.close()
+    return jsonify({
+        'mysql_status': mysql_status,
+        'mysql_data_count': mysql_data_count,
+        'data_count': len(df),
+        'columns': df.columns.tolist(),
+        'sample_questions': df['question'].head().tolist(),
+        'tfidf_shape': tfidf_matrix.shape if tfidf_matrix is not None else None,
+        'vectorizer_features': len(vectorizer.get_feature_names_out()) if vectorizer else None,
+        'json_file_exists': str(get_data_path(JSON_FILE).exists())
+    })
+
 if __name__ == "__main__":
     initialize_app(app)
     print("✅ Dữ liệu đã khởi tạo")
     port = int(os.environ.get('PORT', 4000))
-    app.run(host='0.0.0.0', port=port, debug=False) 
+    app.run(host='0.0.0.0', port=port, debug=False)
